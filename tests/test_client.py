@@ -1,7 +1,7 @@
 """Tests for the HN client."""
 
 import pytest
-from mcp_hn.hn import HNClient, VALID_STORY_TYPES
+from hn_mcp.hn import HNClient, VALID_STORY_TYPES
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ class TestHNClient:
     @pytest.mark.asyncio
     async def test_get_stories_invalid_type(self, client: HNClient):
         """Test that invalid story type raises error."""
-        from mcp_hn.hn import HNClientError
+        from hn_mcp.hn import HNClientError
         
         with pytest.raises(HNClientError):
             await client.get_stories("invalid_type")

@@ -4,7 +4,7 @@ Unit tests for mcp_hn.hn module (HN Client).
 
 import pytest
 
-from mcp_hn.hn import (
+from hn_mcp.hn import (
     DEFAULT_NUM_STORIES,
     HNClient,
     HNClientError,

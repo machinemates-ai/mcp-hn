@@ -4,7 +4,7 @@ Unit tests for mcp_hn.content module (article extraction).
 
 import pytest
 
-from mcp_hn.content import (
+from hn_mcp.content import (
     ContentExtractionError,
     _extract_article_content,
     _is_blocked_host,
@@ -110,7 +110,7 @@ class TestFetchArticleContent:
     @pytest.mark.asyncio
     async def test_invalid_url_raises_error(self) -> None:
         """Test invalid URLs raise ContentExtractionError."""
-        from mcp_hn.content import fetch_article_content
+        from hn_mcp.content import fetch_article_content
 
         with pytest.raises(ContentExtractionError) as exc_info:
             await fetch_article_content("not-a-url")
@@ -119,7 +119,7 @@ class TestFetchArticleContent:
     @pytest.mark.asyncio
     async def test_blocked_host_raises_error(self) -> None:
         """Test blocked hosts raise ContentExtractionError."""
-        from mcp_hn.content import fetch_article_content
+        from hn_mcp.content import fetch_article_content
 
         with pytest.raises(ContentExtractionError) as exc_info:
             await fetch_article_content("http://localhost/page")

@@ -2,7 +2,7 @@
 
 import pytest
 
-from mcp_hn.cache import HNCache, cached
+from hn_mcp.cache import HNCache, cached
 
 
 class TestHNCache:

@@ -59,10 +59,7 @@ Repository = "https://github.com/machinemates-ai/hn-mcp"
 Issues = "https://github.com/machinemates-ai/hn-mcp/issues"
 
 [project.scripts]
-# Backward compatible entry point - matches original erithwik/mcp-hn
-mcp-hn = "mcp_hn:main"
-# Alias for convenience
-hn-mcp = "mcp_hn:main"
+hn-mcp = "hn_mcp:main"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
@@ -72,13 +69,16 @@ build-backend = "hatchling.build"
 source = "vcs"
 
 [tool.hatch.build.targets.wheel]
-# Package name matches original for backward compatibility
-packages = ["src/mcp_hn"]
+packages = ["src/hn_mcp"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+markers = [
+    "e2e: mark test as end-to-end (requires network)",
+    "slow: mark test as slow running",
+]
 
 [tool.mypy]
 strict = true

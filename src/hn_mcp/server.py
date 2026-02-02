@@ -1,5 +1,5 @@
 """
-MCP-HN Server - FastMCP 3.0 Implementation.
+HN-MCP Server - FastMCP Implementation.
 
 A comprehensive MCP server for Hacker News with:
 - Tools: Search, get stories, get user info, fetch article content
@@ -7,24 +7,37 @@ A comprehensive MCP server for Hacker News with:
 - Prompts: Templates for common HN analysis tasks
 - Caching: LRU cache with adaptive TTLs
 - Async: Full async/await with httpx
-
-Tool names are backward compatible with erithwik/mcp-hn.
 """
 
 import json
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
-from mcp_hn.cache import get_cache
-from mcp_hn.content import ContentExtractionError, fetch_article_content
-from mcp_hn.hn import HNClient
+from hn_mcp.cache import get_cache
+from hn_mcp.content import ContentExtractionError, fetch_article_content
+from hn_mcp.hn import HNClient
 
-# Create FastMCP server - name matches original
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastMCP) -> AsyncIterator[None]:
+    """Initialize server resources on startup."""
+    logger.info("Starting hn-mcp server...")
+    yield
+    logger.info("Shutting down hn-mcp server...")
+
+
+# Create FastMCP server with lifespan
 mcp = FastMCP(
-    name="hn",
-    version="1.0.0",
+    name="hn-mcp",
+    lifespan=lifespan,
     instructions="""
-    MCP-HN provides access to Hacker News via MCP.
+    HN-MCP provides access to Hacker News via MCP.
 
     Available capabilities:
     - Tools: get_stories, search_stories, get_story_info, get_user_info
@@ -38,7 +51,7 @@ mcp = FastMCP(
 
 
 # =============================================================================
-# TOOLS - Backward compatible with erithwik/mcp-hn
+# TOOLS (all read-only)
 # =============================================================================
 
 
@@ -46,9 +59,10 @@ mcp = FastMCP(
     name="get_stories",
     description=(
         "Get stories from Hacker News. "
-        "Options are `top`, `new`, `ask_hn`, `show_hn` for types of stories. "
+        "Options are `top`, `new`, `ask`, `show`, `job` for types of stories. "
         "This doesn't include comments. Use `get_story_info` to get comments."
     ),
+    annotations=ToolAnnotations(readOnlyHint=True),
 )
 async def get_stories(
     story_type: str = "top",
@@ -58,7 +72,7 @@ async def get_stories(
     Fetch Hacker News stories by type.
 
     Args:
-        story_type: Type of stories - 'top', 'new', 'ask_hn', 'show_hn'
+        story_type: Type of stories - 'top', 'new', 'ask', 'show', 'job'
         num_stories: Number of stories to get (default: 10)
     """
     num_stories = min(max(1, num_stories), 50)
@@ -76,6 +90,7 @@ async def get_stories(
         "It is generally recommended to use simpler queries (< 5 words). "
         "Very targeted queries may not return any results."
     ),
+    annotations=ToolAnnotations(readOnlyHint=True),
 )
 async def search_stories(
     query: str,
@@ -101,6 +116,7 @@ async def search_stories(
 @mcp.tool(
     name="get_story_info",
     description="Get detailed story info from Hacker News, including the comments",
+    annotations=ToolAnnotations(readOnlyHint=True),
 )
 async def get_story_info(story_id: int) -> str:
     """
@@ -120,6 +136,7 @@ async def get_story_info(story_id: int) -> str:
     description=(
         "Get user info from Hacker News, including the stories they've submitted"
     ),
+    annotations=ToolAnnotations(readOnlyHint=True),
 )
 async def get_user_info(
     user_name: str,
@@ -141,13 +158,14 @@ async def get_user_info(
 
 
 # =============================================================================
-# NEW TOOLS - Extensions beyond original mcp-hn
+# Additional tools
 # =============================================================================
 
 
 @mcp.tool(
     name="fetch_article_content",
     description="Fetch and extract article content as Markdown from a story's URL",
+    annotations=ToolAnnotations(readOnlyHint=True),
 )
 async def tool_fetch_article_content(url: str) -> str:
     """
@@ -166,6 +184,7 @@ async def tool_fetch_article_content(url: str) -> str:
 @mcp.tool(
     name="cache_stats",
     description="Get cache statistics for debugging and monitoring",
+    annotations=ToolAnnotations(readOnlyHint=True),
 )
 async def cache_stats() -> str:
     """Get current cache statistics."""
@@ -174,7 +193,7 @@ async def cache_stats() -> str:
 
 
 # =============================================================================
-# RESOURCES - hackernews:// URIs (like paabloLC/mcp-hacker-news)
+# RESOURCES - hackernews:// URIs
 # =============================================================================
 
 

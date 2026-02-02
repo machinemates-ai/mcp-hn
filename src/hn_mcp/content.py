@@ -11,7 +11,7 @@ import httpx
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 
-from mcp_hn.cache import cached
+from hn_mcp.cache import cached
 
 # Blocked private IP ranges for security
 BLOCKED_HOSTS = frozenset([

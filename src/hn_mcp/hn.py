@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 
-from mcp_hn.cache import cached
+from hn_mcp.cache import cached
 
 # API Base URLs
 ALGOLIA_BASE = "https://hn.algolia.com/api/v1"
