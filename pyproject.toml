@@ -47,6 +47,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.0.0",
+    "pytest-timeout>=2.3.0",
     "mypy>=1.10.0",
     "ruff>=0.4.0",
 ]
@@ -78,6 +79,7 @@ markers = [
     "e2e: mark test as end-to-end (requires network)",
     "slow: mark test as slow running",
 ]
+addopts = "-m 'not e2e'"
 
 [tool.mypy]
 strict = true

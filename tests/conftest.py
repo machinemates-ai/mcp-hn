@@ -15,6 +15,12 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "slow: mark test as slow running")
 
 
+@pytest.fixture(scope="session")
+def anyio_backend() -> str:
+    """Use asyncio for async tests."""
+    return "asyncio"
+
+
 @pytest.fixture
 def sample_story() -> dict:
     """Sample HN story for testing."""
