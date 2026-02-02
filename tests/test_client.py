@@ -1,7 +1,7 @@
 """Tests for the HN client."""
 
 import pytest
-from hn_mcp.client import HNClient, VALID_STORY_TYPES
+from mcp_hn.hn import HNClient, VALID_STORY_TYPES
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ class TestHNClient:
     @pytest.mark.asyncio
     async def test_get_stories_invalid_type(self, client: HNClient):
         """Test that invalid story type raises error."""
-        from hn_mcp.client import HNClientError
+        from mcp_hn.hn import HNClientError
         
         with pytest.raises(HNClientError):
             await client.get_stories("invalid_type")
@@ -38,5 +38,7 @@ class TestHNClient:
     @pytest.mark.asyncio
     async def test_valid_story_types(self):
         """Test all valid story types are covered."""
-        expected = ["top", "new", "best", "ask", "show", "job"]
-        assert VALID_STORY_TYPES == expected
+        # Backward compatible: ask_hn, show_hn plus aliases ask, show
+        expected = ["top", "new", "best", "ask_hn", "show_hn", "job", "ask", "show"]
+        for t in expected:
+            assert t in VALID_STORY_TYPES

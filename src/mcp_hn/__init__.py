@@ -1,5 +1,5 @@
 """
-HN-MCP: Hacker News MCP Server
+MCP-HN: Hacker News MCP Server
 
 A FastMCP 3.0 server providing Tools, Resources, and Prompts for Hacker News.
 
@@ -9,8 +9,10 @@ Features:
 - MCP Resources (hackernews:// URIs)
 - Both Algolia and Firebase HN APIs
 - Article content extraction to Markdown
+
+Backward compatible with erithwik/mcp-hn tool names.
 """
 
-from hn_mcp.server import mcp, main
+from mcp_hn.server import main
 
-__all__ = ["mcp", "main"]
+__all__ = ["main"]

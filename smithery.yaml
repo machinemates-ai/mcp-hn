@@ -1,0 +1,13 @@
+# Smithery.ai Configuration - MCP-HN
+# Deploy to: https://smithery.ai/
+# Compatible with original erithwik/mcp-hn
+
+startCommand:
+  type: stdio
+  configSchema: {}
+  commandFunction: |
+    (config) => ({
+      command: 'mcp-hn',
+      args: [],
+      env: {}
+    })
