@@ -35,10 +35,9 @@ dependencies = [
     "fastmcp>=2.0.0",
     # Async HTTP client
     "httpx>=0.28.0",
-    # HTML parsing for article content extraction
-    "beautifulsoup4>=4.12.0",
-    # HTML to Markdown conversion (like GeorgeNance's turndown)
-    "markdownify>=0.14.1",
+    # Article extraction with markdown output (F1: 0.937 accuracy)
+    # Replaces beautifulsoup4 + markdownify with purpose-built extraction
+    "trafilatura>=2.0.0",
     # Time-based caching with TTL support
     "cachetools>=5.5.0",
 ]

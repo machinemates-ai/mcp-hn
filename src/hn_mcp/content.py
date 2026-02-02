@@ -1,29 +1,46 @@
 """
 Article Content Extraction.
 
-Fetches and converts article HTML to Markdown.
-Inspired by GeorgeNance/hackernews-mcp's turndown-based approach.
+Fetches and extracts article content as Markdown using trafilatura.
+Trafilatura is the gold standard for web article extraction (F1: 0.937).
+
+Security: Includes SSRF protection by blocking private IPs and cloud metadata endpoints.
 """
 
 from urllib.parse import urlparse
 
 import httpx
-from bs4 import BeautifulSoup
-from markdownify import markdownify as md
+import trafilatura
 
 from hn_mcp.cache import cached
 
-# Blocked private IP ranges for security
+# Blocked private IP ranges for SSRF protection
+# Includes: localhost, private ranges (RFC 1918), cloud metadata endpoints
 BLOCKED_HOSTS = frozenset([
+    # Localhost
     "localhost",
     "127.0.0.1",
     "0.0.0.0",
-    "10.",
-    "172.16.", "172.17.", "172.18.", "172.19.",
+    # IPv6 localhost
+    "::1",
+    "[::1]",
+    # Cloud metadata endpoints (CRITICAL for SSRF protection)
+    "169.254.169.254",  # AWS/GCP/Azure metadata
+    "metadata.google.internal",  # GCP alternative
+    "metadata",  # Kubernetes
+])
+
+# Private IP range prefixes (RFC 1918 + link-local)
+BLOCKED_PREFIXES = frozenset([
+    "10.",           # 10.0.0.0/8
+    "172.16.", "172.17.", "172.18.", "172.19.",  # 172.16.0.0/12
     "172.20.", "172.21.", "172.22.", "172.23.",
     "172.24.", "172.25.", "172.26.", "172.27.",
     "172.28.", "172.29.", "172.30.", "172.31.",
-    "192.168.",
+    "192.168.",      # 192.168.0.0/16
+    "169.254.",      # Link-local (AWS metadata range)
+    "fd",            # IPv6 private (fd00::/8)
+    "fe80:",         # IPv6 link-local
 ])
 
 # Content type whitelist
@@ -44,18 +61,18 @@ class ContentExtractionError(Exception):
 
 
 def _is_blocked_host(url: str) -> bool:
-    """Check if the URL host is a blocked private IP."""
+    """Check if the URL host is a blocked private IP or cloud metadata endpoint."""
     try:
         parsed = urlparse(url)
-        host = parsed.hostname or ""
+        host = (parsed.hostname or "").lower()
 
-        # Check exact matches
+        # Check exact matches (localhost, metadata endpoints)
         if host in BLOCKED_HOSTS:
             return True
 
         # Check prefix matches (for IP ranges)
-        for prefix in BLOCKED_HOSTS:
-            if prefix.endswith(".") and host.startswith(prefix):
+        for prefix in BLOCKED_PREFIXES:
+            if host.startswith(prefix):
                 return True
 
         return False
@@ -67,63 +84,37 @@ def _extract_article_content(html: str) -> str:
     """
     Extract main article content from HTML and convert to Markdown.
 
-    Uses heuristics to find the main content area.
+    Uses trafilatura for superior article extraction accuracy (F1: 0.937).
+    Automatically removes navigation, ads, footers, and other boilerplate.
     """
-    soup = BeautifulSoup(html, "html.parser")
+    # Trafilatura with markdown output - gold standard for article extraction
+    markdown_content = trafilatura.extract(
+        html,
+        output_format="markdown",
+        include_comments=False,
+        include_tables=True,
+        include_links=True,
+        include_images=False,  # Skip images for cleaner text
+        include_formatting=True,
+        no_fallback=False,  # Use fallback extraction if main extraction fails
+    )
 
-    # Remove script, style, nav, header, footer elements
-    for element in soup.find_all([
-        "script", "style", "nav", "header", "footer", "aside", "iframe"
-    ]):
-        element.decompose()
-
-    # Try to find main content
-    content = None
-
-    # 1. Look for <article> tag
-    article = soup.find("article")
-    if article:
-        content = article
-
-    # 2. Look for common content containers
-    if not content:
-        selectors = [
-            "main",
-            ".content",
-            ".post-content",
-            ".article-content",
-            ".entry-content",
-            "#content",
-        ]
-        for selector in selectors:
-            if selector.startswith((".", "#")):
-                found = soup.select_one(selector)
-            else:
-                found = soup.find(selector)
-            if found:
-                content = found
-                break
-
-    # 3. Fall back to body
-    if not content:
-        content = soup.body or soup
-
-    # Convert to markdown
-    try:
-        markdown_content = md(
-            str(content),
-            heading_style="ATX",
-            strip=["img", "script", "style"],
+    if not markdown_content:
+        # Fallback: Try plain text extraction
+        text_content = trafilatura.extract(
+            html,
+            output_format="txt",
+            include_comments=False,
+            no_fallback=False,
         )
-    except Exception:
-        # Fallback to plain text
-        markdown_content = content.get_text(separator="\n", strip=True)
+        markdown_content = text_content or ""
 
-    # Clean up excessive whitespace
-    lines = [line.strip() for line in markdown_content.split("\n")]
-    cleaned = "\n".join(line for line in lines if line)
+    if not markdown_content:
+        raise ContentExtractionError("Could not extract content from HTML")
 
-    # Limit length
+    # Clean up and limit length
+    cleaned = markdown_content.strip()
+
     max_chars = 50000
     if len(cleaned) > max_chars:
         cleaned = cleaned[:max_chars] + "\n\n[Content truncated...]"
@@ -183,10 +174,9 @@ async def fetch_article_content(url: str) -> dict[str, str]:
 
             html = response.text
 
-            # Extract title
-            soup = BeautifulSoup(html, "html.parser")
-            title_tag = soup.find("title")
-            title = title_tag.get_text(strip=True) if title_tag else ""
+            # Extract title using trafilatura's metadata extraction
+            metadata = trafilatura.extract_metadata(html)
+            title = metadata.title if metadata and metadata.title else ""
 
             # Extract content as markdown
             content = _extract_article_content(html)
