@@ -7,6 +7,7 @@ Trafilatura is the gold standard for web article extraction (F1: 0.937).
 Security: Includes SSRF protection by blocking private IPs and cloud metadata endpoints.
 """
 
+from ipaddress import IPv4Address, IPv6Address, ip_address
 from urllib.parse import urlparse
 
 import httpx
@@ -19,18 +20,12 @@ from hn_mcp.cache import cached
 BLOCKED_HOSTS = frozenset([
     # Localhost
     "localhost",
-    "127.0.0.1",
-    "0.0.0.0",
-    # IPv6 localhost
-    "::1",
-    "[::1]",
     # Cloud metadata endpoints (CRITICAL for SSRF protection)
-    "169.254.169.254",  # AWS/GCP/Azure metadata
     "metadata.google.internal",  # GCP alternative
     "metadata",  # Kubernetes
 ])
 
-# Private IP range prefixes (RFC 1918 + link-local)
+# Private IP range prefixes (RFC 1918 + link-local) - for fallback string matching
 BLOCKED_PREFIXES = frozenset([
     "10.",           # 10.0.0.0/8
     "172.16.", "172.17.", "172.18.", "172.19.",  # 172.16.0.0/12
@@ -39,6 +34,20 @@ BLOCKED_PREFIXES = frozenset([
     "172.28.", "172.29.", "172.30.", "172.31.",
     "192.168.",      # 192.168.0.0/16
     "169.254.",      # Link-local (AWS metadata range)
+    "100.64.",       # Carrier-grade NAT (RFC 6598)
+    "100.65.", "100.66.", "100.67.", "100.68.", "100.69.",
+    "100.70.", "100.71.", "100.72.", "100.73.", "100.74.",
+    "100.75.", "100.76.", "100.77.", "100.78.", "100.79.",
+    "100.80.", "100.81.", "100.82.", "100.83.", "100.84.",
+    "100.85.", "100.86.", "100.87.", "100.88.", "100.89.",
+    "100.90.", "100.91.", "100.92.", "100.93.", "100.94.",
+    "100.95.", "100.96.", "100.97.", "100.98.", "100.99.",
+    "100.100.", "100.101.", "100.102.", "100.103.", "100.104.",
+    "100.105.", "100.106.", "100.107.", "100.108.", "100.109.",
+    "100.110.", "100.111.", "100.112.", "100.113.", "100.114.",
+    "100.115.", "100.116.", "100.117.", "100.118.", "100.119.",
+    "100.120.", "100.121.", "100.122.", "100.123.", "100.124.",
+    "100.125.", "100.126.", "100.127.",
     "fd",            # IPv6 private (fd00::/8)
     "fe80:",         # IPv6 link-local
 ])
@@ -61,16 +70,65 @@ class ContentExtractionError(Exception):
 
 
 def _is_blocked_host(url: str) -> bool:
-    """Check if the URL host is a blocked private IP or cloud metadata endpoint."""
+    """Check if the URL host is a blocked private IP or cloud metadata endpoint.
+    
+    Uses Python's ipaddress module for robust IP validation including:
+    - IPv4 private ranges (10.x, 172.16-31.x, 192.168.x)
+    - IPv6 private ranges  
+    - IPv4-mapped IPv6 addresses (::ffff:127.0.0.1)
+    - Loopback addresses
+    - Link-local addresses
+    - Cloud metadata endpoints
+    """
     try:
         parsed = urlparse(url)
         host = (parsed.hostname or "").lower()
+        
+        # Strip brackets from IPv6 addresses
+        if host.startswith('[') and host.endswith(']'):
+            host = host[1:-1]
 
         # Check exact matches (localhost, metadata endpoints)
         if host in BLOCKED_HOSTS:
             return True
 
-        # Check prefix matches (for IP ranges)
+        # Try to parse as IP address for robust checking
+        try:
+            addr = ip_address(host)
+            
+            # Check for IPv4-mapped IPv6 (::ffff:x.x.x.x)
+            if isinstance(addr, IPv6Address) and addr.ipv4_mapped:
+                # Check the underlying IPv4 address
+                ipv4 = addr.ipv4_mapped
+                if ipv4.is_private or ipv4.is_loopback or ipv4.is_link_local:
+                    return True
+                # Also check for cloud metadata IP
+                if str(ipv4) == "169.254.169.254":
+                    return True
+            
+            # Standard checks via ipaddress module
+            if addr.is_private:
+                return True
+            if addr.is_loopback:
+                return True
+            if addr.is_link_local:
+                return True
+            if addr.is_reserved:
+                return True
+            if addr.is_multicast:
+                return True
+            
+            # Additional check: cloud metadata endpoint
+            if isinstance(addr, IPv4Address) and str(addr) == "169.254.169.254":
+                return True
+                
+            return False
+            
+        except ValueError:
+            # Not a valid IP address, check as hostname
+            pass
+
+        # Check prefix matches (for hostnames/edge cases)
         for prefix in BLOCKED_PREFIXES:
             if host.startswith(prefix):
                 return True

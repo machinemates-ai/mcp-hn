@@ -31,9 +31,21 @@ TTL_CONFIGS: dict[str, int] = {
 
 
 def _get_cache_key(func_name: str, *args: Any, **kwargs: Any) -> str:
-    """Generate a cache key from function name and arguments."""
+    """Generate a cache key from function name and arguments.
+    
+    Filters out 'self' argument from method calls to ensure cache
+    is shared across different object instances.
+    """
     key_parts = [func_name]
-    key_parts.extend(str(arg) for arg in args)
+    
+    # Filter args: skip object instances (likely 'self')
+    for arg in args:
+        # Skip objects that look like 'self' (have __dict__ but aren't basic types)
+        if hasattr(arg, '__dict__') and not isinstance(arg, (dict, list, set, frozenset)):
+            # Skip class instances (self, client objects, etc.)
+            continue
+        key_parts.append(str(arg))
+    
     key_parts.extend(f"{k}={v}" for k, v in sorted(kwargs.items()))
     key_string = ":".join(key_parts)
     return hashlib.md5(key_string.encode()).hexdigest()

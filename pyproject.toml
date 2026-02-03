@@ -31,8 +31,8 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    # FastMCP for clean decorator-based MCP patterns (3.0b1 has resources/prompts support)
-    "fastmcp>=2.0.0",
+    # FastMCP 3.0 beta - new Components/Providers/Transforms architecture
+    "fastmcp>=3.0.0b1",
     # Async HTTP client
     "httpx>=0.28.0",
     # Article extraction with markdown output (F1: 0.937 accuracy)

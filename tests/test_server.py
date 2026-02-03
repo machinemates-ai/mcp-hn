@@ -136,3 +136,135 @@ class TestCacheStats:
         assert "hits" in stats
         assert "misses" in stats
         assert "hit_rate" in stats
+
+
+class TestHNExplain:
+    """Tests for hn_explain tool."""
+
+    def test_explain_known_term(self) -> None:
+        """Test explaining a known HN term."""
+        from hn_mcp.server import explain_hn_term
+
+        data = explain_hn_term("karma")
+
+        assert data["term"] == "karma"
+        assert data["normalized"] == "karma"
+        assert "definition" in data
+        assert "context" in data
+        assert "upvotes" in data["definition"].lower()
+
+    def test_explain_with_alias(self) -> None:
+        """Test term aliases work correctly."""
+        from hn_mcp.server import explain_hn_term
+
+        data = explain_hn_term("Show HN")
+
+        assert data["normalized"] == "show_hn"
+        assert "definition" in data
+
+    def test_explain_shadowban_alias(self) -> None:
+        """Test shadowban maps to hellban."""
+        from hn_mcp.server import explain_hn_term
+
+        data = explain_hn_term("shadowban")
+
+        assert data["normalized"] == "hellban"
+        assert "invisible" in data["definition"].lower()
+
+    def test_explain_dang(self) -> None:
+        """Test dang term returns moderator info."""
+        from hn_mcp.server import explain_hn_term
+
+        data = explain_hn_term("dang")
+
+        assert data["normalized"] == "dang"
+        assert "moderator" in data["definition"].lower() or "daniel" in data["definition"].lower()
+
+    def test_explain_unknown_term(self) -> None:
+        """Test unknown term returns list of available terms."""
+        from hn_mcp.server import explain_hn_term
+
+        data = explain_hn_term("notarealterm")
+
+        assert "error" in data
+        assert "available_terms" in data
+        assert isinstance(data["available_terms"], list)
+        assert "karma" in data["available_terms"]
+
+    def test_explain_case_insensitive(self) -> None:
+        """Test terms are case-insensitive."""
+        from hn_mcp.server import explain_hn_term
+
+        data = explain_hn_term("KARMA")
+
+        assert data["normalized"] == "karma"
+        assert "definition" in data
+
+    def test_explain_all_glossary_terms(self) -> None:
+        """Test all glossary terms have required fields."""
+        from hn_mcp.server import HN_GLOSSARY
+
+        for term, entry in HN_GLOSSARY.items():
+            assert "definition" in entry, f"Missing definition for {term}"
+            assert "context" in entry, f"Missing context for {term}"
+            assert len(entry["definition"]) > 10, f"Definition too short for {term}"
+
+
+class TestRateLimiter:
+    """Tests for rate limiting module."""
+
+    @pytest.mark.asyncio
+    async def test_rate_limiter_basic(self) -> None:
+        """Test rate limiter allows requests under limit."""
+        from hn_mcp.rate_limit import RateLimiter, RateLimitConfig
+
+        limiter = RateLimiter(config=RateLimitConfig(requests_per_minute=100))
+
+        # Should allow immediate acquisition
+        wait_time = await limiter.acquire()
+        assert wait_time == 0.0
+
+    @pytest.mark.asyncio
+    async def test_rate_limiter_stats(self) -> None:
+        """Test rate limiter stats."""
+        from hn_mcp.rate_limit import RateLimiter, RateLimitConfig
+
+        limiter = RateLimiter(config=RateLimitConfig(requests_per_minute=100))
+
+        # Make a few requests
+        await limiter.acquire()
+        await limiter.acquire()
+        await limiter.acquire()
+
+        stats = await limiter.stats()
+
+        assert stats["requests_in_window"] == 3
+        assert stats["requests_per_minute_limit"] == 100
+        assert "capacity_used_percent" in stats
+
+    @pytest.mark.asyncio
+    async def test_rate_limiter_reset(self) -> None:
+        """Test rate limiter reset."""
+        from hn_mcp.rate_limit import RateLimiter, RateLimitConfig
+
+        limiter = RateLimiter(config=RateLimitConfig(requests_per_minute=100))
+
+        await limiter.acquire()
+        await limiter.acquire()
+
+        assert (await limiter.stats())["requests_in_window"] == 2
+
+        limiter.reset()
+        assert (await limiter.stats())["requests_in_window"] == 0
+
+    def test_global_rate_limiter(self) -> None:
+        """Test global rate limiter singleton."""
+        from hn_mcp.rate_limit import get_rate_limiter, configure_rate_limiter
+
+        # Configure with custom limit
+        limiter = configure_rate_limiter(requests_per_minute=500)
+        assert limiter.config.requests_per_minute == 500
+
+        # Get should return same instance
+        same_limiter = get_rate_limiter()
+        assert same_limiter is limiter

@@ -18,6 +18,6 @@ try:
 except PackageNotFoundError:
     __version__ = "0.0.0+unknown"
 
-from hn_mcp.server import main, mcp
+from hn_mcp.server import asgi_app, main, mcp
 
-__all__ = ["__version__", "main", "mcp"]
+__all__ = ["__version__", "asgi_app", "main", "mcp"]

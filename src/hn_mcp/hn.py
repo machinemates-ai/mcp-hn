@@ -12,10 +12,12 @@ Backward compatible with erithwik/mcp-hn function signatures.
 """
 
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
 from hn_mcp.cache import cached
+from hn_mcp.rate_limit import get_rate_limiter
 
 # API Base URLs
 ALGOLIA_BASE = "https://hn.algolia.com/api/v1"
@@ -84,6 +86,15 @@ class HNClient:
             )
         return self._client
 
+    async def _rate_limited_get(self, url: str) -> httpx.Response:
+        """Make a rate-limited GET request.
+
+        Waits if necessary to respect the global rate limit before making the request.
+        """
+        rate_limiter = get_rate_limiter()
+        await rate_limiter.wait_and_acquire()
+        return await self.client.get(url)
+
     # =========================================================================
     # Algolia API Methods (fast, search-optimized)
     # =========================================================================
@@ -117,7 +128,7 @@ class HNClient:
             f"?tags={params['tags']}&hitsPerPage={num_stories}"
         )
 
-        response = await self.client.get(url)
+        response = await self._rate_limited_get(url)
         response.raise_for_status()
         data = response.json()
 
@@ -142,12 +153,14 @@ class HNClient:
             List of matching story dictionaries
         """
         endpoint = "search_by_date" if search_by_date else "search"
+        # URL-encode query to handle special chars like &, +, #, =
+        encoded_query = quote(query, safe="")
         url = (
             f"{ALGOLIA_BASE}/{endpoint}"
-            f"?query={query}&hitsPerPage={num_results}&tags=story"
+            f"?query={encoded_query}&hitsPerPage={num_results}&tags=story"
         )
 
-        response = await self.client.get(url)
+        response = await self._rate_limited_get(url)
         response.raise_for_status()
         data = response.json()
 
@@ -174,7 +187,7 @@ class HNClient:
             Story dictionary with id, title, url, author, points, and comments
         """
         url = f"{ALGOLIA_BASE}/items/{story_id}"
-        response = await self.client.get(url)
+        response = await self._rate_limited_get(url)
         response.raise_for_status()
         data = response.json()
 
@@ -208,7 +221,7 @@ class HNClient:
             User dictionary with id, karma, about, created_at, and stories
         """
         url = f"{ALGOLIA_BASE}/users/{user_name}"
-        response = await self.client.get(url)
+        response = await self._rate_limited_get(url)
         response.raise_for_status()
         user_data = response.json()
 
@@ -225,7 +238,7 @@ class HNClient:
             f"{ALGOLIA_BASE}/search"
             f"?tags=author_{user_name},story&hitsPerPage={num_stories}"
         )
-        stories_response = await self.client.get(stories_url)
+        stories_response = await self._rate_limited_get(stories_url)
         stories_response.raise_for_status()
         stories_data = stories_response.json()
         result["stories"] = [
@@ -259,7 +272,7 @@ class HNClient:
         endpoint = type_map.get(story_type.lower(), "topstories")
         url = f"{FIREBASE_BASE}/{endpoint}.json"
 
-        response = await self.client.get(url)
+        response = await self._rate_limited_get(url)
         response.raise_for_status()
         ids = response.json() or []
 
@@ -269,7 +282,7 @@ class HNClient:
     async def get_item_firebase(self, item_id: int) -> dict[str, Any] | None:
         """Get a single item from Firebase API."""
         url = f"{FIREBASE_BASE}/item/{item_id}.json"
-        response = await self.client.get(url)
+        response = await self._rate_limited_get(url)
         response.raise_for_status()
         return response.json()
 

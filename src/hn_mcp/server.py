@@ -20,6 +20,7 @@ from mcp.types import ToolAnnotations
 from hn_mcp.cache import get_cache
 from hn_mcp.content import ContentExtractionError, fetch_article_content
 from hn_mcp.hn import HNClient
+from hn_mcp.rate_limit import get_rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -115,18 +116,42 @@ async def search_stories(
 
 @mcp.tool(
     name="get_story_info",
-    description="Get detailed story info from Hacker News, including the comments",
+    description=(
+        "Get detailed story info from Hacker News, including the comments. "
+        "Use include_comments=False for just the story metadata. "
+        "Use comment_depth to control how deep to fetch nested replies (1-10)."
+    ),
     annotations=ToolAnnotations(readOnlyHint=True),
 )
-async def get_story_info(story_id: int) -> str:
+async def get_story_info(
+    story_id: int,
+    include_comments: bool = True,
+    comment_depth: int = 3,
+    max_comments: int = 20,
+) -> str:
     """
     Get detailed information about a specific story.
 
     Args:
         story_id: The Hacker News story ID
+        include_comments: Whether to include comments (default: True)
+        comment_depth: How deep to fetch nested comments, 1-10 (default: 3)
+        max_comments: Max comments per level, 1-50 (default: 20)
     """
+    # Clamp values to valid ranges
+    comment_depth = min(max(1, comment_depth), 10)
+    max_comments = min(max(1, max_comments), 50)
+
     async with HNClient() as client:
-        story = await client.get_story_info(story_id)
+        if include_comments:
+            story = await client.get_story_info(
+                story_id,
+                comment_depth=comment_depth,
+                num_comments=max_comments,
+            )
+        else:
+            # Fetch without comments - depth 0 means no comment processing
+            story = await client.get_story_info(story_id, comment_depth=0)
 
     return json.dumps(story, indent=2)
 
@@ -183,13 +208,175 @@ async def tool_fetch_article_content(url: str) -> str:
 
 @mcp.tool(
     name="cache_stats",
-    description="Get cache statistics for debugging and monitoring",
+    description="Get cache and rate limiter statistics for debugging and monitoring",
     annotations=ToolAnnotations(readOnlyHint=True),
 )
 async def cache_stats() -> str:
-    """Get current cache statistics."""
-    stats = get_cache().stats()
-    return json.dumps(stats, indent=2)
+    """Get current cache and rate limiter statistics."""
+    result = {
+        "cache": get_cache().stats(),
+        "rate_limiter": await get_rate_limiter().stats(),
+    }
+    return json.dumps(result, indent=2)
+
+
+# HN Culture Glossary (inspired by karanb192/hn-mcp's hn_explain tool)
+HN_GLOSSARY: dict[str, dict[str, str]] = {
+    "karma": {
+        "definition": "Points accumulated from upvotes on your submissions and comments.",
+        "context": "Higher karma indicates community trust. Some features require minimum karma.",
+    },
+    "flagged": {
+        "definition": "Content marked by users as inappropriate, off-topic, or spam.",
+        "context": "Flagged posts may be hidden or penalized in rankings.",
+    },
+    "dead": {
+        "definition": "Content killed by moderators or auto-detected as low quality.",
+        "context": "Dead posts are invisible unless 'showdead' is enabled in settings.",
+    },
+    "dupe": {
+        "definition": "Duplicate submission of content already posted.",
+        "context": "Dupes are typically merged or removed. HN has a 1-year lookback.",
+    },
+    "show_hn": {
+        "definition": "Prefix for sharing something you made with the community.",
+        "context": "Reserved for original work. Format: 'Show HN: [Title]'",
+    },
+    "ask_hn": {
+        "definition": "Prefix for asking questions to the HN community.",
+        "context": "Great for advice, opinions, or open-ended discussions.",
+    },
+    "tell_hn": {
+        "definition": "Prefix for sharing information or announcements.",
+        "context": "Less common than Ask/Show. Used for community PSAs.",
+    },
+    "pg": {
+        "definition": "Paul Graham, co-founder of Y Combinator and creator of HN.",
+        "context": "His username is 'pg'. His essays are legendary in the community.",
+    },
+    "dang": {
+        "definition": "Daniel Gackle, lead moderator of Hacker News since 2014.",
+        "context": "Known for thoughtful moderation and 'Please don't' reminders.",
+    },
+    "yc": {
+        "definition": "Y Combinator, the startup accelerator that runs HN.",
+        "context": "YC-funded startups often get attention on HN.",
+    },
+    "hn_guidelines": {
+        "definition": "Official rules: no flamewars, be civil, assume good faith.",
+        "context": "See https://news.ycombinator.com/newsguidelines.html",
+    },
+    "hellban": {
+        "definition": "User's posts appear normal to them but invisible to others.",
+        "context": "Applied to persistent rule violators. Also called 'shadowban'.",
+    },
+    "vouching": {
+        "definition": "High-karma users can 'vouch' for dead/flagged content to restore it.",
+        "context": "Click 'vouch' on dead comments you believe are legitimate.",
+    },
+    "topcolor": {
+        "definition": "Orange bar at top that changes color at high karma (≈500+).",
+        "context": "A vanity feature. Deeper orange = higher karma.",
+    },
+    "front_page": {
+        "definition": "The main HN page showing ~30 top-ranked stories.",
+        "context": "Stories are ranked by points, time, and engagement.",
+    },
+    "flame_war": {
+        "definition": "Heated, unproductive argument thread.",
+        "context": "Moderators may detach or kill flame war subtrees.",
+    },
+    "detached": {
+        "definition": "Comment thread separated from parent discussion.",
+        "context": "Done by mods when threads go off-topic.",
+    },
+}
+
+
+def explain_hn_term(term: str) -> dict[str, str | list[str]]:
+    """
+    Get explanation of a Hacker News term or concept.
+
+    Args:
+        term: The HN term to explain (e.g., 'karma', 'Show HN', 'dang')
+
+    Returns:
+        Dict with definition, context, and related terms
+    """
+    # Normalize the term
+    normalized = term.lower().strip().replace(" ", "_").replace("-", "_")
+
+    # Handle common variations
+    variations = {
+        "show": "show_hn",
+        "ask": "ask_hn",
+        "tell": "tell_hn",
+        "shadow_ban": "hellban",
+        "shadowban": "hellban",
+        "shadowbanned": "hellban",
+        "shadow_banned": "hellban",
+        "guidelines": "hn_guidelines",
+        "rules": "hn_guidelines",
+        "paul_graham": "pg",
+        "daniel_gackle": "dang",
+        "y_combinator": "yc",
+        "ycombinator": "yc",
+        "duplicate": "dupe",
+        "duped": "dupe",
+        "top_color": "topcolor",
+        "flamewar": "flame_war",
+        "flames": "flame_war",
+        "frontpage": "front_page",
+        "homepage": "front_page",
+        "vouch": "vouching",
+        "vouched": "vouching",
+        "killed": "dead",
+        "kill": "dead",
+        "flag": "flagged",
+        "flags": "flagged",
+    }
+    normalized = variations.get(normalized, normalized)
+
+    if normalized in HN_GLOSSARY:
+        entry = HN_GLOSSARY[normalized]
+        return {
+            "term": term,
+            "normalized": normalized,
+            "definition": entry["definition"],
+            "context": entry["context"],
+        }
+    else:
+        # Return list of available terms
+        available = sorted(HN_GLOSSARY.keys())
+        return {
+            "term": term,
+            "error": f"Unknown term: '{term}'",
+            "available_terms": available,
+            "hint": "Try one of the available terms, or search HN for more context.",
+        }
+
+
+@mcp.tool(
+    name="hn_explain",
+    description=(
+        "Explain Hacker News terminology, culture, and conventions. "
+        "Use this to understand HN-specific terms like 'karma', 'flagged', "
+        "'Show HN', 'dang', 'hellban', etc."
+    ),
+    annotations=ToolAnnotations(readOnlyHint=True),
+)
+async def hn_explain(term: str) -> str:
+    """
+    Get explanation of a Hacker News term or concept.
+
+    Args:
+        term: The HN term to explain (e.g., 'karma', 'Show HN', 'dang')
+
+    Returns:
+        JSON with definition, context, and related terms
+    """
+    result = explain_hn_term(term)
+    return json.dumps(result, indent=2)
 
 
 # =============================================================================
@@ -350,8 +537,30 @@ Please analyze:
 
 
 def main() -> None:
-    """Run the MCP-HN server."""
+    """Run the MCP-HN server.
+
+    Supports multiple transports via environment variables or CLI:
+    - STDIO (default): For Claude Desktop, Cursor, etc.
+    - HTTP: For web clients via `--transport http --port 8080`
+    - SSE: For Server-Sent Events via `--transport sse`
+    - Streamable HTTP: For interactive via `--transport streamable-http`
+
+    Examples:
+        # Default stdio transport
+        hn-mcp
+
+        # HTTP server on port 8080
+        fastmcp run src/hn_mcp/server.py --transport http --port 8080
+
+        # Or via uvicorn directly
+        uvicorn hn_mcp.server:mcp.asgi_app --host 0.0.0.0 --port 8080
+    """
     mcp.run()
+
+
+# ASGI app for HTTP/SSE transport (uvicorn, hypercorn, etc.)
+# Usage: uvicorn hn_mcp.server:asgi_app --host 0.0.0.0 --port 8080
+asgi_app = mcp.http_app()
 
 
 if __name__ == "__main__":
