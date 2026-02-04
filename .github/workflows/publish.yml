@@ -1,0 +1,114 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      test_pypi:
+        description: 'Publish to TestPyPI instead of PyPI'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required for hatch-vcs to read git tags
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Run tests
+        run: uv run pytest -v --tb=short
+
+      - name: Run linter
+        run: uv run ruff check src/
+
+      - name: Run type checker
+        run: uv run mypy src/
+
+      - name: Build package
+        run: uv build
+
+      - name: Upload Python artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install mcpb CLI
+        run: npm install -g @anthropic-ai/mcpb
+
+      - name: Build MCPB bundle
+        run: mcpb pack . hn-mcp.mcpb
+
+      - name: Upload MCPB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcpb
+          path: hn-mcp.mcpb
+
+  publish-testpypi:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.test_pypi
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write       # OIDC authentication
+      attestations: write   # PEP 740 digital attestations
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    needs: build
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.test_pypi)
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write       # OIDC authentication
+      attestations: write   # PEP 740 digital attestations
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  attach-mcpb:
+    needs: build
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # To upload release assets
+    steps:
+      - name: Download MCPB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mcpb
+
+      - name: Attach MCPB to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: hn-mcp.mcpb
